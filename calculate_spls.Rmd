@@ -1,0 +1,190 @@
+---
+title: "IIRN multiomic analysis"
+output: html_notebook
+---
+# Prep
+
+##Load libraries
+
+```{r}
+library(mixOmics)
+library(tidyverse)
+library(tidymodels)
+library(stringr)
+library(ggplot2)
+library(magrittr)
+library(ggdist)
+library(MCMCpack)
+library(vegan)
+library(rstatix)
+library(readxl)
+library(readr)
+library(fastshap)
+
+```
+
+## Function - pls_with_stat
+This function calculates sPLS and returns tidy statistics
+
+```{r}
+
+calc_pls_with_stat <- function(omic_1, omic_2, n_itr = 100, keepX = 10 , keepY = 10){
+  
+  #calculate PLS
+  pls_result <- calc_pls(data_1 = omic_1, data_2 = omic_2, keepX = keepX , keepY = keepY)
+                        
+  #compere with shuffeled results
+  random_results <- c()
+                         
+  for(i in 1:n_itr){
+    omic_2_shuffled <- omic_2[sample(1:nrow(omic_2)),]
+    pls_result_random <- calc_pls(data_1 = omic_1, data_2 = omic_2_shuffled)
+    random_rho <- pls_result_random$rho
+    random_results[i] <- random_rho
+    }
+
+  threshold <- quantile(random_results, 0.95)
+  rho = pls_result$rho[[1]]
+  tmp <- unique(c(random_results,rho ))
+  p <- (length(tmp)- rank(tmp)[which(tmp == rho)][[1]])/length(tmp)
+                         
+  result_table <- tibble(rho = pls_result$rho,
+                         threshold = threshold[[1]],
+                         p = p,
+                         is_stat_signif = if_else(rho > threshold, true = "yes", false  = "no"))
+  
+  if(p !=0 ){
+  p_value <- formatC(p, digits=3)  
+  subtitle <- str_c("Spearman =",rho , ", p=", formatC(p, digits = 3))
+  }else{
+   subtitle <- str_c("Spearman =",rho , ", p<", 1/n_itr) 
+  }
+  
+  return(list(comp_table= pls_result$comp_table, 
+       result_table = result_table,
+       subtitle = subtitle))
+  
+                         
+}
+```
+
+## Load data
+```{r}
+
+# feature table of samples wiht stool metabolome & metagenome
+stool_mtb_mtx_feature_table <- read_delim("../stool_mtb_mtx_feature_table.tsv")
+
+# feature table of samples with serum metabolome & metagenome
+serum_mtb_mtx_feature_table <- read_delim("../serum_mtb_mtx_feature_table")
+
+```
+
+
+# sPLS association between omics
+
+## stool mtb mtx 
+```{r fig.width=5, fig.height=4}
+
+#convert to mixomics format
+stool_mtx_mixomics <- stool_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("taxa"))%>%
+  arrange(subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+
+stool_mtb_mixomics <- stool_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("mtb"))%>%
+  arrange(subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+
+spls_stool_mtb_mtx <- calc_pls_with_stat(omic_1 = stool_mtx_mixomics,omic_2 = stool_mtb_mixomics, keepX = 97, keepY = 398, n_itr = 1000 )
+
+spls_stool_mtb_mtx_for_plot <- spls_stool_mtb_mtx$comp_table%>%
+  left_join(stool_metadata, by = c("sample_id" = "subject_visit_id" ))
+
+ggplot(spls_stool_mtb_mtx_for_plot, aes( x= x_comp_1, y = y_comp_1))+
+  geom_point(size = 4, alpha = 0.7, aes(color = group))+
+  geom_smooth(method = "lm", fill = "grey70", color = "grey30", alpha = 0.2)+
+  theme_bw(base_size = 15)+
+  labs(x = "Metagenomics", y =  "Stool metabolomics", subtitle = spls_stool_mtb_mtx$subtitle)+
+  theme(axis.title.x=element_text(colour="#E07A5F"),
+        axis.title.y=element_text(colour="#4281A4"))+
+  scale_color_manual("Group", values = c("#ff595e", "#227c9d"))
+
+```
+
+## serum mtb mtx 
+```{r fig.width=5, fig.height=4}
+serum_mtx_mixomics <- serum_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("taxa"))%>%
+  arrange(subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+
+serum_mtb_mixomics <- serum_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("mtb"))%>%
+  arrange(subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+
+pls_serum_mtb_mtx <-  calc_pls_with_stat(serum_mtx_mixomics, serum_mtb_mixomics, keepX = 97, keepY = 308, n_itr = 1000)
+
+pls_serum_mtb_mtx_for_plot <- pls_serum_mtb_mtx$comp_table%>%
+  left_join(serum_metadata, by = c("sample_id" = "subject_visit_id" ))
+
+
+ggplot(pls_serum_mtb_mtx_for_plot, aes( x= x_comp_1, y = y_comp_1))+
+  geom_point(size = 4, alpha = 0.7, aes(color = group))+
+  geom_smooth(method = "lm", fill = "grey70", color = "grey30", alpha = 0.2)+
+  theme_bw(base_size = 15)+
+  labs(x = "Metagenomics", y =  "Serum metabolomics", subtitle = pls_serum_mtb_mtx$subtitle)+
+  theme(axis.title.x=element_text(colour="#E07A5F"),
+        axis.title.y=element_text(colour="#717EC3"))+
+    scale_color_manual("Group", values = c("#ff595e", "#227c9d"))
+
+```
+
+
+## serum mtb to stool mtb 
+```{r fig.width=5, fig.height=4}
+
+#====================================================
+#select timepoint that have both serum and stool mtb
+#====================================================
+
+
+tmp <- serum_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("mtb"))%>%
+  arrange(subject_visit_id)
+
+tmp2 <- stool_mtb_mtx_feature_table%>%
+  select(subject_visit_id, contains("mtb"))%>%
+  arrange(subject_visit_id)
+
+serum_mtb_with_stool <- filter(tmp, subject_visit_id %in% tmp2$subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+  
+stool_mtb_with_serum <- filter(tmp2, subject_visit_id %in% tmp$subject_visit_id)%>%
+  column_to_rownames("subject_visit_id")
+
+#====================================================
+#calc PLS
+#====================================================
+
+pls_serum_stool_mtb <-  calc_pls_with_stat(serum_mtb_with_stool, stool_mtb_with_serum, keepX = 308, keepY = 398, n_itr = 1000)
+
+#====================================================
+#plot
+#====================================================
+
+pls_serum_stool_mtb_for_plot <- pls_serum_stool_mtb$comp_table%>%
+  left_join(serum_metadata, by = c("sample_id" = "subject_visit_id" ))
+
+ggplot(pls_serum_stool_mtb_for_plot, aes( x= x_comp_1, y = y_comp_1))+
+  geom_point(size = 4, alpha = 0.7, aes(color = group))+
+  geom_smooth(method = "lm", fill = "grey70", color = "grey30", alpha = 0.2)+
+  theme_bw(base_size = 15)+
+  labs(x = "Serum metabolomics", y =  "Stool metabolomics", subtitle = pls_serum_stool_mtb$subtitle)+
+  theme(axis.title.x=element_text(colour="#717EC3"),
+        axis.title.y=element_text(colour="#4281A4"))+
+      scale_color_manual("Group", values = c("#ff595e", "#227c9d"))
+
+```
+
