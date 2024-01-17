@@ -7,8 +7,8 @@ This repository contains the code associated with the paper titled "Integrative 
 This repository contains the code for conducting the multi-omic analysis performed in the study. It includes the scripts and resources necessary to reproduce the results and further analyze the data.
 For more detailed analysis and source data, please visit the paper.
 
-predict_mtb_by_mtx.R - This code predict the metabolome based on the microbiome composition. 
-calculate_spls.Rmd - This code calculate sPLS between the omics. 
+predict_mtb_by_mtx.R - This code predict the metabolome based on the microbiome composition.
+calculate_spls.Rmd - This code calculate sPLS between the omics.
 
 ## Usage
 
